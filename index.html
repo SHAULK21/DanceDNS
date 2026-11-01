@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          var activeFetch = function() {
+            var target = originalFetch || window.fetch;
+            return target.apply(window, arguments);
+          };
+
+          var descriptor = {
+            get: function() {
+              return activeFetch;
+            },
+            set: function(newFetch) {
+              activeFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true
+          };
+
+          Object.defineProperty(window, 'fetch', descriptor);
+
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            try {
+              Object.defineProperty(Window.prototype, 'fetch', descriptor);
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        window.addEventListener('error', function(event) {
+          if (event && event.filename && event.filename.indexOf('chrome-extension://') !== -1) {
+            event.preventDefault();
+            return true;
+          }
+        });
+      })();
+    </script>
+    <title>RustyYoga DNS - Process-Aware DoH Client</title>
+    <meta name="description" content="High-performance Rust-based YogaDNS analogue featuring DNS-over-HTTPS client, per-process traffic routing rules, live DoH upstream benchmarking, and complete compilable Rust codebase." />
+    <meta property="og:title" content="RustyYoga DNS - Process-Aware DoH Client" />
+    <meta property="og:description" content="High-performance Rust-based YogaDNS analogue featuring DNS-over-HTTPS client, per-process traffic routing rules, live DoH upstream benchmarking, and complete compilable Rust codebase." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

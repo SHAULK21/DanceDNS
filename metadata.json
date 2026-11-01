@@ -1,0 +1,6 @@
+{
+  "name": "RustyYoga DNS - Process-Aware DoH Client",
+  "description": "High-performance Rust-based YogaDNS analogue featuring DNS-over-HTTPS client, per-process traffic routing rules, live DoH upstream benchmarking, and complete compilable Rust codebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
