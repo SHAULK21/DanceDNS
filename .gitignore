@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+core/target/
+dancedns.yaml
+dancedns-dns-backup.json
