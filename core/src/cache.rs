@@ -47,7 +47,4 @@ impl DnsCache {
         self.inner.lock().clear();
     }
 
-    pub fn len(&self) -> usize {
-        self.inner.lock().len()
-    }
 }

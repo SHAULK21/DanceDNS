@@ -1,4 +1,4 @@
-//! DNS-over-HTTPS (RFC 8484) upstream clients and pools.
+//! Upstream clients (DNS-over-HTTPS RFC 8484, DNS-over-QUIC RFC 9250) and pools.
 
 use crate::config::{PoolConfig, PoolStrategy, ServerConfig};
 use anyhow::{anyhow, bail, Context, Result};
@@ -16,7 +16,7 @@ pub struct Upstream {
     pub id: String,
     pub name: String,
     pub url: String,
-    client: reqwest::Client,
+    transport: Transport,
     /// Smoothed latency in microseconds, 0 = not measured yet.
     ewma_us: AtomicU64,
     ok: AtomicU64,
@@ -30,6 +30,7 @@ pub struct UpstreamStats {
     pub id: String,
     pub name: String,
     pub url: String,
+    pub protocol: &'static str,
     pub latency_ms: Option<f64>,
     pub healthy: bool,
     pub ok: u64,
@@ -37,9 +38,24 @@ pub struct UpstreamStats {
     pub last_error: Option<String>,
 }
 
+enum Transport {
+    Doh(reqwest::Client),
+    Doq(crate::doq::DoqClient),
+}
+
 impl Upstream {
+    pub fn protocol(&self) -> &'static str {
+        match self.transport {
+            Transport::Doh(_) => "DoH",
+            Transport::Doq(_) => "DoQ",
+        }
+    }
+
     pub fn new(cfg: &ServerConfig) -> Result<Self> {
         let url = url::Url::parse(&cfg.url)?;
+        if url.scheme() == "quic" {
+            return Ok(Self::with_transport(cfg, Transport::Doq(crate::doq::DoqClient::new(&url, &cfg.bootstrap, cfg.timeout_ms)?)));
+        }
         let host = url.host_str().ok_or_else(|| anyhow!("в URL нет хоста"))?.to_string();
         let port = url.port_or_known_default().unwrap_or(443);
         let mut b = reqwest::Client::builder()
@@ -67,17 +83,22 @@ impl Upstream {
                 .collect();
             b = b.resolve_to_addrs(&host, &addrs);
         }
-        Ok(Self {
+        let client = b.build().context("не удалось создать HTTP клиент")?;
+        Ok(Self::with_transport(cfg, Transport::Doh(client)))
+    }
+
+    fn with_transport(cfg: &ServerConfig, transport: Transport) -> Self {
+        Self {
             id: cfg.id.clone(),
             name: if cfg.name.is_empty() { cfg.id.clone() } else { cfg.name.clone() },
             url: cfg.url.clone(),
-            client: b.build().context("не удалось создать HTTP клиент")?,
+            transport,
             ewma_us: AtomicU64::new(0),
             ok: AtomicU64::new(0),
             fail: AtomicU64::new(0),
             last_ok: AtomicBool::new(true),
             last_error: Mutex::new(None),
-        })
+        }
     }
 
     /// Send a wire-format query, returns the wire-format response.
@@ -106,8 +127,11 @@ impl Upstream {
     }
 
     async fn query_inner(&self, packet: &[u8]) -> Result<Bytes> {
-        let resp = self
-            .client
+        let client = match &self.transport {
+            Transport::Doq(c) => return c.query(packet).await.map_err(|e| anyhow!("{}: {e:#}", self.id)),
+            Transport::Doh(c) => c,
+        };
+        let resp = client
             .post(&self.url)
             .header("content-type", "application/dns-message")
             .header("accept", "application/dns-message")
@@ -135,6 +159,7 @@ impl Upstream {
             id: self.id.clone(),
             name: self.name.clone(),
             url: self.url.clone(),
+            protocol: self.protocol(),
             healthy: self.last_ok.load(Ordering::Relaxed),
             latency_ms: if l == 0 || !self.last_ok.load(Ordering::Relaxed) { None } else { Some(l as f64 / 1000.0) },
             ok: self.ok.load(Ordering::Relaxed),

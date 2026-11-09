@@ -1,12 +1,11 @@
 //! Helpers for building and inspecting DNS messages.
 
 use bytes::Bytes;
-use hickory_proto::op::{Message, MessageType, OpCode, Query, ResponseCode};
+use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA};
-use hickory_proto::rr::{Name, RData, Record, RecordType};
+use hickory_proto::rr::{RData, Record, RecordType};
 use serde::Serialize;
 use std::net::IpAddr;
-use std::str::FromStr;
 
 fn base_response(q: &Message, rcode: ResponseCode) -> Message {
     let mut m = Message::new();
@@ -123,20 +122,4 @@ pub fn inspect(resp: &[u8]) -> Option<ResponseInfo> {
         cache_ttl,
         dnssec_ad: m.authentic_data(),
     })
-}
-
-/// Build a wire query for the "test resolve" feature.
-pub fn build_query(domain: &str, qtype: &str) -> anyhow::Result<Vec<u8>> {
-    let name = Name::from_str(domain.trim())?;
-    let rtype = RecordType::from_str(&qtype.trim().to_uppercase())?;
-    let mut m = Message::new();
-    m.set_id(rand_id());
-    m.set_recursion_desired(true);
-    m.add_query(Query::query(name, rtype));
-    Ok(m.to_vec()?)
-}
-
-fn rand_id() -> u16 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    (SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(1) & 0xffff) as u16
 }
