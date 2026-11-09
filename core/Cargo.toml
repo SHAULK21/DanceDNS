@@ -1,8 +1,8 @@
 [package]
 name = "dancedns"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Portable process-aware DNS-over-HTTPS client with per-process routing rules and a built-in web UI."
+description = "Portable process-aware DNS-over-QUIC / DNS-over-HTTPS client for Windows with per-process rules."
 license = "MIT"
 build = "build.rs"
 
@@ -24,12 +24,12 @@ anyhow = "1"
 glob = "0.3"
 lru = "0.12"
 bytes = "1"
-axum = "0.7"
-rust-embed = "8"
-mime_guess = "2"
 url = "2"
 parking_lot = "0.12"
-open = "5"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
@@ -40,11 +40,16 @@ windows-sys = { version = "0.52", features = [
     "Win32_Security",
     "Win32_UI_Shell",
     "Win32_System_IO",
+    "Win32_System_Time",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_Etw",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+native-windows-gui = { version = "1.0.13", default-features = false, features = ["tray-notification", "list-view", "animation-timer", "combobox", "menu", "embed-resource", "cursor", "high-dpi"] }
 
 
 [build-dependencies]
-embed-manifest = "1.4"
+embed-resource = "3"
 
 [profile.release]
 opt-level = 3
@@ -52,3 +57,6 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[dev-dependencies]
+rcgen = "0.13"

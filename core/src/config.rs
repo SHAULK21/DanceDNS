@@ -12,10 +12,14 @@ use std::path::Path;
 pub struct Config {
     /// Local DNS listen addresses (UDP + TCP).
     pub listen: Vec<String>,
-    /// Web control panel address.
-    pub ui_addr: String,
-    /// Open the control panel in the default browser on start.
-    pub open_browser: bool,
+    /// Switch the system DNS to DanceDNS automatically on start.
+    pub auto_enable: bool,
+    /// Start minimized to the tray.
+    pub start_minimized: bool,
+    /// Windows: also catch DNS packets that bypass the system settings (WinDivert driver).
+    pub intercept_all: bool,
+    /// Windows: find the real program behind queries made through the DNS Client service (ETW).
+    pub etw_attribution: bool,
     /// Plain DNS server used by the `direct` action (ip:port).
     pub direct_dns: String,
     /// Pool used when no rule matches.
@@ -48,7 +52,7 @@ pub struct ServerConfig {
     pub id: String,
     #[serde(default)]
     pub name: String,
-    /// RFC 8484 DoH endpoint, e.g. https://cloudflare-dns.com/dns-query
+    /// DoH endpoint (https://cloudflare-dns.com/dns-query) or DoQ server (quic://dns.adguard-dns.com[:853])
     pub url: String,
     /// IPs used to reach the DoH host without asking the system resolver
     /// (avoids a loop once the system DNS points to DanceDNS).
@@ -153,22 +157,29 @@ impl Default for Config {
         };
         Config {
             listen: vec!["127.0.0.1:53".into(), "[::1]:53".into()],
-            ui_addr: "127.0.0.1:5380".into(),
-            open_browser: true,
+            auto_enable: true,
+            start_minimized: false,
+            intercept_all: true,
+            etw_attribution: true,
             direct_dns: "1.1.1.1:53".into(),
-            default_pool: "default".into(),
+            default_pool: "doq".into(),
             restore_dns_on_exit: true,
             cache: CacheConfig::default(),
             servers: vec![
+                srv("adguard-doq", "AdGuard DNS", "quic://unfiltered.adguard-dns.com", &["94.140.14.140", "94.140.14.141"]),
+                srv("adguard-doq-ads", "AdGuard DNS + блок рекламы", "quic://dns.adguard-dns.com", &["94.140.14.14", "94.140.15.15"]),
+                srv("controld-doq", "Control D", "quic://p0.freedns.controld.com", &["76.76.2.0", "76.76.10.0"]),
                 srv("cloudflare", "Cloudflare", "https://cloudflare-dns.com/dns-query", &["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111"]),
                 srv("cloudflare-security", "Cloudflare Security", "https://security.cloudflare-dns.com/dns-query", &["1.1.1.2", "1.0.0.2"]),
                 srv("quad9", "Quad9", "https://dns.quad9.net/dns-query", &["9.9.9.9", "149.112.112.112"]),
                 srv("google", "Google Public DNS", "https://dns.google/dns-query", &["8.8.8.8", "8.8.4.4"]),
-                srv("adguard", "AdGuard DNS", "https://dns.adguard-dns.com/dns-query", &["94.140.14.14", "94.140.15.15"]),
+                srv("adguard", "AdGuard DNS + блок рекламы", "https://dns.adguard-dns.com/dns-query", &["94.140.14.14", "94.140.15.15"]),
                 srv("mullvad", "Mullvad DNS", "https://dns.mullvad.net/dns-query", &["194.242.2.2"]),
                 srv("controld", "Control D (unfiltered)", "https://freedns.controld.com/p0", &["76.76.2.0", "76.76.10.0"]),
             ],
             pools: vec![
+                PoolConfig { id: "doq".into(), servers: vec!["adguard-doq".into(), "controld-doq".into()], strategy: PoolStrategy::Fastest },
+                PoolConfig { id: "doq-adblock".into(), servers: vec!["adguard-doq-ads".into()], strategy: PoolStrategy::Fastest },
                 PoolConfig { id: "default".into(), servers: vec!["cloudflare".into(), "quad9".into(), "google".into()], strategy: PoolStrategy::Fastest },
                 PoolConfig { id: "secure".into(), servers: vec!["quad9".into(), "cloudflare-security".into()], strategy: PoolStrategy::Failover },
                 PoolConfig { id: "adblock".into(), servers: vec!["adguard".into(), "mullvad".into()], strategy: PoolStrategy::Fastest },
@@ -200,7 +211,7 @@ impl Config {
 
     pub fn save(&self, path: &Path) -> Result<()> {
         let yaml = serde_yaml::to_string(self)?;
-        let header = "# DanceDNS configuration. Edit here or in the web panel (http://127.0.0.1:5380).\n";
+        let header = "# Настройки DanceDNS. После сохранения файла DanceDNS применит их автоматически.\n# Серверы: https://... = DNS-over-HTTPS, quic://... = DNS-over-QUIC (порт 853).\n";
         let tmp = path.with_extension("yaml.tmp");
         std::fs::write(&tmp, format!("{header}{yaml}"))?;
         std::fs::rename(&tmp, path)?;
@@ -214,7 +225,6 @@ impl Config {
         for l in &self.listen {
             l.parse::<SocketAddr>().with_context(|| format!("неверный адрес listen: {l}"))?;
         }
-        self.ui_addr.parse::<SocketAddr>().with_context(|| format!("неверный ui_addr: {}", self.ui_addr))?;
         self.direct_dns.parse::<SocketAddr>().with_context(|| format!("неверный direct_dns: {}", self.direct_dns))?;
 
         let mut server_ids = HashSet::new();
@@ -226,8 +236,11 @@ impl Config {
                 bail!("повторяющийся id сервера: {}", s.id);
             }
             let u = url::Url::parse(&s.url).with_context(|| format!("неверный URL сервера {}: {}", s.id, s.url))?;
-            if u.scheme() != "https" {
-                bail!("сервер {}: DoH URL должен начинаться с https://", s.id);
+            if u.scheme() != "https" && u.scheme() != "quic" {
+                bail!("сервер {}: адрес должен начинаться с https:// (DoH) или quic:// (DoQ)", s.id);
+            }
+            if u.host_str().is_none() {
+                bail!("сервер {}: в адресе нет хоста", s.id);
             }
             for ip in &s.bootstrap {
                 ip.parse::<std::net::IpAddr>()

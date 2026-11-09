@@ -82,7 +82,6 @@ pub struct Engine {
     pub runtime: RwLock<Arc<Runtime>>,
     pub tracker: ProcessTracker,
     pub config_path: PathBuf,
-    pub started: Instant,
     log: Mutex<VecDeque<LogEntry>>,
     seq: AtomicU64,
     counters: Mutex<Counters>,
@@ -105,7 +104,6 @@ impl Engine {
             runtime: RwLock::new(Arc::new(rt)),
             tracker: ProcessTracker::new(),
             config_path,
-            started: Instant::now(),
             log: Mutex::new(VecDeque::with_capacity(LOG_CAP)),
             seq: AtomicU64::new(0),
             counters: Mutex::new(Counters::default()),
@@ -118,10 +116,16 @@ impl Engine {
 
     /// Validate, save and hot-apply a new config.
     pub fn apply_config(&self, cfg: Config) -> Result<()> {
+        self.apply_runtime(cfg)?;
+        self.rt().config.save(&self.config_path)?;
+        Ok(())
+    }
+
+    /// Validate and hot-apply a config without writing the file.
+    pub fn apply_runtime(&self, cfg: Config) -> Result<()> {
         cfg.validate()?;
         let old = self.rt();
         let new = Runtime::build(cfg, Some(&old))?;
-        new.config.save(&self.config_path)?;
         *self.runtime.write() = Arc::new(new);
         Ok(())
     }
@@ -133,11 +137,6 @@ impl Engine {
     pub fn logs_after(&self, after: u64, limit: usize) -> Vec<LogEntry> {
         let log = self.log.lock();
         log.iter().filter(|e| e.seq > after).rev().take(limit).cloned().collect::<Vec<_>>().into_iter().rev().collect()
-    }
-
-    pub fn clear_logs(&self) {
-        self.log.lock().clear();
-        *self.counters.lock() = Counters::default();
     }
 
     /// Handle one wire-format DNS query. Returns the response to send (None = drop).
@@ -159,6 +158,9 @@ impl Engine {
             }
         };
 
+        #[cfg(windows)]
+        let proc = attribute_dnscache(&self.tracker, proc, &domain);
+
         let rt = self.rt();
         let m = rt.rules.evaluate(
             proc.as_ref().map(|p| p.name.as_str()),
@@ -171,7 +173,12 @@ impl Engine {
         let mut error = None;
         let status: &'static str;
 
-        let response: Bytes = match m.action {
+        // Firefox: tell it not to enable its own DoH, so its queries stay visible to DanceDNS.
+        let canary = domain.trim_end_matches('.').eq_ignore_ascii_case("use-application-dns.net");
+        let response: Bytes = if canary {
+            status = "blocked";
+            dnsmsg::synthesize_rcode(&query, ResponseCode::NXDomain)
+        } else { match m.action {
             ActionKind::Block => {
                 status = "blocked";
                 match m.sinkhole.as_deref().and_then(|s| s.parse::<IpAddr>().ok()) {
@@ -233,8 +240,7 @@ impl Engine {
                     }
                 }
             }
-        };
-
+        }};
         let info = dnsmsg::inspect(&response);
         let response = if origin.proto == Proto::Udp { dnsmsg::fit_udp(&query, response) } else { response };
 
@@ -285,4 +291,24 @@ impl Engine {
         }
         (Some(response), Some(entry))
     }
+}
+
+/// Queries made through the Windows DNS Client service arrive from svchost.exe; replace it with
+/// the program that actually asked (from ETW), when known.
+#[cfg(windows)]
+fn attribute_dnscache(tracker: &ProcessTracker, proc: Option<ProcessInfo>, domain: &str) -> Option<ProcessInfo> {
+    let is_service = proc.as_ref().map(|p| p.name.eq_ignore_ascii_case("svchost.exe")).unwrap_or(false);
+    if !is_service {
+        return proc;
+    }
+    for pid in crate::etw::lookup(domain) {
+        if proc.as_ref().map(|p| p.pid) == Some(pid) {
+            continue;
+        }
+        let info = tracker.describe(pid);
+        if !info.name.eq_ignore_ascii_case("svchost.exe") {
+            return Some(info);
+        }
+    }
+    proc
 }

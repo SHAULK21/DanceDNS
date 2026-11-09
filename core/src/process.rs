@@ -30,20 +30,18 @@ impl ProcessTracker {
         Self { by_pid: Mutex::new(HashMap::new()) }
     }
 
-    pub fn supported() -> bool {
-        cfg!(any(windows, target_os = "linux"))
+    pub fn find(&self, client: &SocketAddr, proto: Proto, server_port: u16) -> Option<ProcessInfo> {
+        let pid = owner_pid(client, proto, server_port)?;
+        Some(self.describe(pid))
     }
 
-    pub fn find(&self, client: &SocketAddr, proto: Proto, server_port: u16) -> Option<ProcessInfo> {
-        if !client.ip().is_loopback() {
-            return None;
-        }
-        let pid = owner_pid(client, proto, server_port)?;
+    /// Name and path of a PID (cached for a few seconds).
+    pub fn describe(&self, pid: u32) -> ProcessInfo {
         {
             let cache = self.by_pid.lock();
             if let Some((info, t)) = cache.get(&pid) {
                 if t.elapsed() < Duration::from_secs(20) {
-                    return Some(info.clone());
+                    return info.clone();
                 }
             }
         }
@@ -53,7 +51,7 @@ impl ProcessTracker {
             cache.clear();
         }
         cache.insert(pid, (info.clone(), Instant::now()));
-        Some(info)
+        info
     }
 }
 
