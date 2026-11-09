@@ -1,12 +1,12 @@
 # 💃 DanceDNS
 
-Портативный DNS-over-HTTPS клиент для Windows (и Linux) с правилами по процессам. Похож на YogaDNS, но это один `.exe` без установки и со встроенной веб-панелью.
+Портативный DNS-over-HTTPS клиент для Windows с правилами по процессам. Похож на YogaDNS, но это один `.exe` без установки и со встроенной веб-панелью.
 
 - **Настоящий DNS-сервер** на `127.0.0.1:53` и `[::1]:53` (UDP и TCP).
 - **DoH (RFC 8484)**: Cloudflare, Quad9, Google, AdGuard, Mullvad, Control D и любые свои серверы. Соединения HTTP/2 переиспользуются, адреса серверов задаются bootstrap-IP, поэтому нет зацикливания на самого себя.
 - **Пулы серверов** со стратегиями «самый быстрый», «по порядку (резерв)», «по очереди». Если сервер не отвечает, запрос автоматически уходит на следующий.
 - **Правила** по имени процесса, пути к exe, домену и типу запроса. Действия: через пул DoH, блокировать (NXDOMAIN или 0.0.0.0), свой IP, напрямую (обычный DNS).
-- **Определение процесса** по сокету клиента: Windows через `GetExtendedUdpTable`/`GetExtendedTcpTable`, Linux через `/proc`.
+- **Определение процесса** по сокету клиента через `GetExtendedUdpTable`/`GetExtendedTcpTable`.
 - **Кэш** с учётом TTL, включая отрицательные ответы.
 - **Журнал запросов в реальном времени**: процесс, правило, сервер, время ответа, записи ответа. Из журнала можно в один клик заблокировать домен или создать правило.
 - **Переключение системного DNS** одной кнопкой. Прежние настройки сохраняются в файл и восстанавливаются при выходе, даже после аварийного завершения (`--restore-dns`).
@@ -66,14 +66,14 @@ rules:
 
 ## Сборка из исходников
 
-Нужны Node.js 20+ и Rust (stable).
+Нужны Node.js 20+ и Rust (stable). На Windows:
 
 ```bash
 npm ci
-npm run build:app          # UI + core/target/release/dancedns(.exe)
+npm run build:app          # UI + core\target\release\dancedns.exe
 ```
 
-Кросс-сборка Windows-версии из Linux (нужен `mingw-w64`):
+Кросс-сборка из Linux (нужен `mingw-w64`):
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
@@ -82,7 +82,7 @@ npm run build:win          # core/target/x86_64-pc-windows-gnu/release/dancedns.
 
 Разработка интерфейса с горячей перезагрузкой: запустите ядро (`cargo run --manifest-path core/Cargo.toml -- --no-browser -l 127.0.0.1:5353`) и в другом терминале `npm run dev`. Vite проксирует `/api` на ядро.
 
-Тесты: `npm test`. При каждом push GitHub Actions собирает Windows- и Linux-версии. Тег `v*` публикует релиз с архивами.
+Тесты: `npm test`. При каждом push GitHub Actions собирает Windows-версию. Тег `v*` публикует релиз с архивом.
 
 ## Устройство
 
@@ -92,8 +92,8 @@ core/                  ядро на Rust (tokio, hickory-proto, reqwest+rustls,
   src/engine.rs        обработка запроса: процесс → правило → кэш/DoH → ответ + журнал
   src/rules.rs         движок правил
   src/upstream.rs      DoH-клиенты, пулы, bootstrap, обычный DNS для «напрямую»
-  src/process.rs       определение процесса по сокету (Windows / Linux)
-  src/sysdns.rs        переключение и восстановление системного DNS (Windows)
+  src/process.rs       определение процесса по сокету
+  src/sysdns.rs        переключение и восстановление системного DNS
   src/api.rs           REST API панели и встроенные файлы UI
 src/                   веб-панель (React + Tailwind), встраивается в exe при сборке
 ```
