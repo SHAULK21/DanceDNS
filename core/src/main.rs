@@ -114,6 +114,15 @@ fn run(args: Args) -> Result<()> {
     }
 
     #[cfg(windows)]
+    if !gui::is_admin() {
+        // port 53, WinDivert, ETW and changing the system DNS all need Administrator rights
+        if gui::relaunch_elevated() {
+            return Ok(());
+        }
+        anyhow::bail!("DanceDNS нужны права администратора: запустите его через «Запуск от имени администратора».");
+    }
+
+    #[cfg(windows)]
     if !gui::single_instance() {
         gui::error_box("DanceDNS", "DanceDNS уже запущен — ищите значок в области уведомлений (трее).");
         return Ok(());

@@ -77,7 +77,7 @@ impl App {
         false
     }
 
-    /// Point Windows at DanceDNS and start interception. Blocking (runs PowerShell), call from a worker thread.
+    /// Point Windows at DanceDNS and start interception. Blocking, call from a worker thread.
     pub fn enable(&self) -> anyhow::Result<()> {
         if !self.can_switch_system() {
             anyhow::bail!(
