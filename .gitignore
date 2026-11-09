@@ -2,6 +2,4 @@ core/target/
 dancedns.yaml
 dancedns-dns-backup.json
 dancedns*.log
-WinDivert.dll
-WinDivert64.sys
 .DS_Store
